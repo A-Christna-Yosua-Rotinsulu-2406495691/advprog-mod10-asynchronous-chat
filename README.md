@@ -123,8 +123,87 @@ loop {
 
 ---
 
+## 🧭 Eksperimen 2.2: Migrasi Port WebSocket ke 8080
+
+Pada eksperimen ini, saya melakukan pemindahan jalur port jaringan yang digunakan oleh aplikasi chat dari port mula-mula `2000` ke port standard alternatif `8080`. Hal ini bertujuan untuk memahami bagaimana penyesuaian porta (*port configuration*) harus diselaraskan secara konsisten di kedua belah pihak agar koneksi jaringan tetap dapat terjalin dengan baik.
+
+---
+
+### 📸 Bukti Keberhasilan Koneksi pada Port 8080
+
+Saya telah berhasil melakukan migrasi dan memvalidasi interaksi chat pada port `8080`. Berikut adalah cuplikan layar terminal serta berkas tangkapan layar `Port8080.png` yang membuktikan bahwa komunikasi broadcast tetap berjalan dengan normal:
+
+![Port 8080](assets/images/Port8080.png)
+
+---
+
+### 🛠️ Di Mana Perubahan Dilakukan?
+
+Karena komunikasi jaringan adalah sebuah hubungan dua arah (*two-way connection*), maka minimal ada 2 sisi utama yang harus saya sesuaikan secara konsisten, yaitu sisi **Server** dan sisi **Client**:
+
+#### 1. Sisi Server (`server.rs`)
+Di sisi server, saya harus mengubah porta tempat pendengar TCP (*TCP Listener*) mendengarkan paket koneksi masuk dari client. Perubahan ini saya lakukan pada fungsi `main()` di berkas `src/bin/server.rs`:
+
+```rust
+// Modifikasi port di src/bin/server.rs:
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let (bcast_tx, _) = channel(16);
+
+    // Mengubah port listener dari 2000 ke 8080
+    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    println!("listening on port 8080");
+
+    loop {
+        let (socket, addr) = listener.accept().await?;
+        println!("New connection from {addr:?}");
+        let bcast_tx = bcast_tx.clone();
+        tokio::spawn(async move {
+            let (_req, ws_stream) = ServerBuilder::new().accept(socket).await?;
+            handle_connection(addr, ws_stream, bcast_tx).await
+        });
+    }
+}
+```
+
+#### 2. Sisi Client (`client.rs`)
+Di sisi client, saya harus menyelaraskan porta tujuan agar mengarah tepat ke pintu gerbang baru server yang kini berada di port `8080`. Perubahan ini saya lakukan pada fungsi `main()` di berkas `src/bin/client.rs`:
+
+```rust
+// Modifikasi port di src/bin/client.rs:
+#[tokio::main]
+async fn main() -> Result<(), tokio_websockets::Error> {
+    // Mengubah port tujuan koneksi WebSocket dari 2000 ke 8080
+    let (mut ws_stream, _) =
+        ClientBuilder::from_uri(Uri::from_static("ws://127.0.0.1:8080"))
+            .connect()
+            .await?;
+
+    let stdin = tokio::io::stdin();
+    let mut stdin = BufReader::new(stdin).lines();
+    // ... loop select asinkronus ...
+}
+```
+
+---
+
+### 🧠 Analisis & Protokol yang Digunakan
+
+* **Apakah koneksi ini masih menggunakan protokol WebSocket yang sama?**
+  **Ya, koneksi ini tetap menggunakan protokol WebSocket yang sama**. Mengubah nomor port dari `2000` menjadi `8080` hanyalah tindakan memindahkan saluran masuk (*physical channel gate*) di tingkat sistem operasi (lapisan transport TCP), tetapi tidak mengubah aturan penataan paket data, tata cara berkirim frame, atau jabat tangan WebSocket di lapisan aplikasi (*application layer*).
+
+* **Di mana protokol ini didefinisikan?**
+  Protokol ini didefinisikan di dua tempat:
+  1. **Sisi Client**: Ditentukan secara eksplisit lewat skema **`ws://`** pada URI statis yang dipasok ke `ClientBuilder::from_uri(...)`. Awalan `ws://` memberitahu pustaka `tokio-websockets` untuk mengirimkan paket inisiasi HTTP khusus (*Upgrade Request*) guna menaikkan status koneksi TCP biasa ke WebSocket.
+  2. **Sisi Server**: Ditentukan saat server mengonversi soket TCP mentah (`TcpStream`) menjadi aliran WebSocket (`WebSocketStream`) menggunakan pembangun server:
+     `let (_req, ws_stream) = ServerBuilder::new().accept(socket).await?;`
+     Baris ini melakukan verifikasi terhadap permintaan jabat tangan WebSocket yang dikirimkan oleh client dan meresponsnya sesuai dengan standard RFC 6455.
+
+---
+
 ## 📚 Refleksi Pribadi
 
-Melalui pengerjaan Eksperimen 2.1 ini, saya memahami bahwa pemrograman asinkronus di Rust dengan runtime Tokio memungkinkan pembuatan aplikasi jaringan real-time yang sangat efisien. 
+Melalui pengerjaan Eksperimen 2.1 dan 2.2 ini, saya memahami bahwa pemrograman asinkronus di Rust dengan runtime Tokio memungkinkan pembuatan aplikasi jaringan real-time yang sangat efisien. 
 
 Alih-alih membuat satu utas sistem operasi (*OS Thread*) per koneksi client (yang memakan banyak memori dan CPU overhead), runtime Tokio memungkinkan ribuan koneksi WebSocket aktif diproses secara efisien di atas beberapa utas latar belakang (*Worker Threads*) yang ringan melalui konsep pemantauan peristiwa (*event pooling*) menggunakan makro `tokio::select!`.
+
