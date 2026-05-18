@@ -21,7 +21,7 @@ async fn main() -> Result<(), tokio_websockets::Error> {
                 match incoming {
                     Some(Ok(msg)) => {
                         if let Some(text) = msg.as_text() {
-                            println!("From server: {}", text);
+                            println!("Christna Yosua Rotinsulu's - From server: {}", text);
                         }
                     },
                     Some(Err(err)) => return Err(err),

@@ -1,7 +1,7 @@
 # ⚡ Modul 10: Asynchronous Programming - Broadcast Chat Application
 ### Nama: Christna Yosua Rotinsulu
 ### NPM: 2406495691
-### Kelas: Pemrograman Lanjut - Fasilkom UI
+
 
 ---
 
@@ -201,9 +201,120 @@ async fn main() -> Result<(), tokio_websockets::Error> {
 
 ---
 
+## 🧭 Eksperimen 2.3: Modifikasi Menampilkan Identitas Pengirim (IP & Port)
+
+Pada eksperimen ini, saya melakukan peningkatan fungsionalitas dengan memodifikasi alur pesan agar setiap client dapat mengetahui identitas pengirim asli pesan tersebut secara transparan. Karena aplikasi chat belum memiliki fitur autentikasi nama pengguna, saya menggunakan kombinasi alamat IP dan Port dinamis dari soket koneksi fisik (`SocketAddr`) sebagai pengenal unik pengirim.
+
+Selain itu, saya juga melakukan kustomisasi prefix konsol pada terminal server dan client untuk mencantumkan identitas personal saya (`Christna Yosua Rotinsulu's`).
+
+---
+
+### 📸 Bukti Keberhasilan Penayangan Alamat Pengirim Dinamis
+
+Saya telah berhasil memodifikasi dan menjalankan obrolan asinkronus ini. Berikut adalah berkas tangkapan layar `SmallChanges.png` serta bukti log terminal saat Client 1 (`127.0.0.1:34560`), Client 2 (`127.0.0.1:34572`), dan Client 3 (`127.0.0.1:34580`) saling berkomunikasi dengan identitas IP:Port dinamis pengirim yang tertera secara real-time:
+
+![Small Changes](assets/images/SmallChanges.png)
+
+---
+
+### 🛠️ Rincian Modifikasi Kode dan Analisis Teoretis
+
+Untuk mewujudkan pemformatan ini, saya menerapkan perubahan di kedua sisi program:
+
+#### 1. Sisi Server (`server.rs`)
+
+Di sisi server, saya melakukan modifikasi pada dua tempat:
+
+* **Format Pesan Broadcast (`handle_connection`)**:
+  Ketika server menerima pesan mentah dari salah satu client melalui WebSocket stream, server tidak langsung menyiarkannya. Saya memodifikasi kode agar server membungkus pesan tersebut terlebih dahulu dengan menambahkan informasi alamat fisik soket pengirim (`addr`) sebelum dipasok ke saluran broadcast:
+
+  ```rust
+  // Modifikasi pemformatan pesan di src/bin/server.rs:
+  incoming = ws_stream.next() => {
+      match incoming {
+          Some(Ok(msg)) => {
+              if let Some(text) = msg.as_text() {
+                  println!("From client {addr:?} {text:?}");
+                  
+                  // Memformat pesan dengan menyisipkan alamat IP & Port dinamis pengirim
+                  let formatted = format!("{}: {}", addr, text);
+                  bcast_tx.send(formatted)?;
+              }
+          }
+          Some(Err(err)) => return Err(err.into()),
+          None => return Ok(()),
+      }
+  }
+  ```
+
+* **Pencetakan Log Koneksi (`main`)**:
+  Untuk memperjelas kepemilikan mesin, saya memodifikasi pesan cetak log di sisi server saat sebuah koneksi TCP baru berhasil dibentuk:
+
+  ```rust
+  // Modifikasi log penerimaan koneksi di src/bin/server.rs:
+  loop {
+      let (socket, addr) = listener.accept().await?;
+      println!("New connection from Christna Yosua Rotinsulu's Computer {addr:?}");
+      let bcast_tx = bcast_tx.clone();
+      tokio::spawn(async move {
+          let (_req, ws_stream) = ServerBuilder::new().accept(socket).await?;
+          handle_connection(addr, ws_stream, bcast_tx).await
+      });
+  }
+  ```
+
+* **Alasan Teoretis Mengapa Pemformatan Identitas Dilakukan di Server**:
+  Server bertindak sebagai **Hub Pusat** (*Central Broker*). Hanya server yang memiliki informasi dan referensi lengkap mengenai alamat soket fisik (`addr` bertipe `SocketAddr`) dari masing-masing TCP stream yang terhubung ke dirinya. Client secara individu bersifat terisolasi dan tidak mengetahui alamat client lainnya. Dengan meletakkan fungsi pemformatan identitas di server sebelum data dimasukkan ke saluran broadcast (`bcast_tx.send`), server memastikan seluruh client menerima format informasi identitas pengirim yang seragam, aman, dan valid.
+
+---
+
+#### 2. Sisi Client (`client.rs`)
+
+Di sisi client, saya memodifikasi bagian pembacaan pesan masuk dari server agar mencantumkan nama identitas kepemilikan mesin saya di konsol terminal lokal:
+
+```rust
+// Modifikasi cetak log di src/bin/client.rs:
+incoming = ws_stream.next() => {
+    match incoming {
+        Some(Ok(msg)) => {
+            if let Some(text) = msg.as_text() {
+                // Menambahkan prefix identitas personal saya di layar client
+                println!("Christna Yosua Rotinsulu's - From server: {}", text);
+            }
+        },
+        Some(Err(err)) => return Err(err),
+        None => return Ok(()),
+    }
+}
+```
+
+* **Alasan Teoretis**: Hal ini memvalidasi bahwa seluruh payload data obrolan yang diterima oleh client (baik pesan pembuka obrolan dari server maupun pesan obrolan broadcast) kini dibungkus dengan prefix identitas konsol lokal saya, memberikan tampilan obrolan yang unik dan terintegrasi secara profesional.
+
+---
+
 ## 📚 Refleksi Pribadi
 
-Melalui pengerjaan Eksperimen 2.1 dan 2.2 ini, saya memahami bahwa pemrograman asinkronus di Rust dengan runtime Tokio memungkinkan pembuatan aplikasi jaringan real-time yang sangat efisien. 
+Melalui pengerjaan Eksperimen 2.1, 2.2, dan 2.3 ini, saya memahami bahwa pemrograman asinkronus di Rust dengan runtime Tokio memungkinkan pembuatan aplikasi jaringan real-time yang sangat efisien. 
 
 Alih-alih membuat satu utas sistem operasi (*OS Thread*) per koneksi client (yang memakan banyak memori dan CPU overhead), runtime Tokio memungkinkan ribuan koneksi WebSocket aktif diproses secara efisien di atas beberapa utas latar belakang (*Worker Threads*) yang ringan melalui konsep pemantauan peristiwa (*event pooling*) menggunakan makro `tokio::select!`.
+
+---
+
+## 📖 Referensi (References)
+
+Berikut adalah dokumentasi resmi yang saya gunakan dalam pengerjaan tutorial pemrograman asinkronus ini:
+
+1. **Sumber Kode Utama & Tutorial**:
+   Google LLC. (2024). *Exercise: Broadcast Chat Application*. Comprehensive Rust. Diambil dari https://google.github.io/comprehensive-rust/concurrency/async-exercises/chat-app.html
+
+2. **Dokumentasi Runtime Asinkronus Tokio**:
+   Tokio Contributors. (2024). *Tokio: A runtime for writing reliable, asynchronous, and slim applications with the Rust programming language*. Rust Crate Documentation. Diambil dari https://docs.rs/tokio/latest/tokio/
+
+3. **Dokumentasi Protokol WebSocket**:
+   Tokio Websockets Contributors. (2024). *tokio-websockets: High-performance, lightweight, and integration-ready WebSockets for Tokio*. Rust Crate Documentation. Diambil dari https://docs.rs/tokio-websockets/latest/tokio_websockets/
+
+4. **Penanganan Aliran Data Asinkronus**:
+   Rust Futures Contributors. (2024). *futures-util: Common utilities and extension traits for Rust futures*. Rust Crate Documentation. Diambil dari https://docs.rs/futures-util/latest/futures_util/
+
+
 
